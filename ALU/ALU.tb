@@ -1,0 +1,603 @@
+-- Testbench for Arithmetic Logic Unit
+-- by David Shaw, Kyler Kellogg, and Seth Glasscock
+---------------------------
+
+   library IEEE;
+   use IEEE.STD_LOGIC_1164.ALL;
+   --use IEEE.STD_LOGIC_ARITH.ALL;
+   --use IEEE.STD_LOGIC_UNSIGNED.ALL;
+   use IEEE.numeric_std.all;
+
+entity TB is
+end TB;
+
+------------------------------------
+architecture Behavioral of TB is
+------------------------------------
+  
+  component ALU is
+    generic ( BITS   : natural := 8 );                                           -- ALU bit width
+    port    ( RESET  : in  std_logic;                                            -- Active high master reset
+              CLOCK  : in  std_logic;                                            -- Master clock
+              ENABLE : in  std_logic;                                            -- Clock enable
+              OPCODE : in  std_logic_vector (3 downto 0);                        -- ALU operation
+              DIN    : in  std_logic_vector (BITS-1 downto 0);                   -- Data input
+              ACCUM  : out std_logic_vector (BITS-1 downto 0);                   -- Accumulator output
+              FLAGS  : out std_logic_vector (3 downto 0));                       -- Status flags output (NVCZ)
+  end component;
+  
+  constant TCLK      : time    := 1 uS;                                          -- Time constant
+  constant BITS      : natural := 8;                                             -- Data size constant
+  signal   DONE      : boolean := FALSE;                                         -- Simulation end handler
+  
+  signal   RESET     : std_logic;                                                -- Internal signals for ALU
+  signal   CLOCK     : std_logic;                                                -- 
+  signal   ENABLE    : std_logic;                                                -- 
+  signal   OPCODE    : std_logic_vector(3 downto 0);                             -- 
+  signal   DIN       : std_logic_vector(BITS-1 downto 0);                        -- 
+  signal   ACCUM     : std_logic_vector(BITS-1 downto 0);                        -- 
+  signal   FLAGS     : std_logic_vector(3 downto 0);                             -- 
+  
+begin
+  
+-------------------
+--  Unit Under Test
+-------------------
+  
+  UUT: ALU 
+    generic map ( BITS   => BITS)                                                -- Port map for ALU
+    port    map ( RESET  => RESET,
+                  CLOCK  => CLOCK,
+                  ENABLE => ENABLE,
+                  OPCODE => OPCODE,
+                  DIN    => DIN,
+                  ACCUM  => ACCUM,
+                  FLAGS  => FLAGS );
+  
+----------------------
+--  Clock/Reset Driver
+----------------------
+  
+  process begin
+    RESET <= '1', '0' after TCLK;                                                -- Initial reset
+    CLOCK <= '0';                                                                --
+    wait for 2 * TCLK;                                                           -- Wait for initial stabilization
+    
+    while not DONE loop                                                          -- While loop that controls the clock
+      CLOCK <= '1', '0' after TCLK / 2;                                          -- Clock is HIGH for half of TCLK and LOW for the other half
+      wait for TCLK;                                                             -- Do this once per TCLK
+    end loop;                                                                    -- 
+    
+    report "Simulation Complete" severity note;                                  -- Successful simulation report
+    wait;
+  end process;
+  
+------------------------------------
+--  Clock Enable Driver (Randomized)
+------------------------------------
+  
+  process 
+    variable  LFSR : std_logic_vector (1 to 23) := "011" & x"C0DED";
+    
+    impure function RANDOM (SIZE : natural) return std_logic_vector is
+      variable RTN : std_logic_vector (1 to SIZE);
+    begin
+      for I in 1 to SIZE loop
+        LFSR := (LFSR (18) xor LFSR (23)) & LFSR (1 to 22);                      -- CCITT O.151 test pattern
+        RTN (I) := LFSR (1);
+      end loop;
+      return RTN;
+    end RANDOM;
+    
+  begin
+    ENABLE <= RANDOM(1)(1);
+    wait until CLOCK = '1';
+  end process;
+  
+  
+---------------------------
+--  Main Test Signal Driver
+---------------------------
+  
+  process 
+    variable  LFSR : std_logic_vector (1 to 23) := "011" & x"C0DED";
+    
+    impure function RANDOM (SIZE : natural) return std_logic_vector is
+      variable RTN : std_logic_vector (1 to SIZE);
+    begin
+      for I in 1 to SIZE loop
+        LFSR := (LFSR (18) xor LFSR (23)) & LFSR (1 to 22);                      -- CCITT O.151 test pattern
+        RTN (I) := LFSR (1);
+      end loop;
+      return RTN;
+    end RANDOM;
+    
+  begin
+    OPCODE <= (others => '0');                                                   -- Initialize OPCODE to 0. A side effect is that the first operation will be ADD
+    DIN    <= (others => '0');                                                   -- Initialize DIN to 0
+    
+    wait for 2 * TCLK;
+    
+    report "Starting Simulation" severity note;
+    
+    -- Start by testing the CLC and SEC opcodes
+    wait until CLOCK = '1';
+    OPCODE <= "1110";                                                            -- CLC (C = 0)
+    wait for 2 * TCLK;
+    
+    wait until CLOCK = '1';
+    OPCODE <= "1111";                                                            -- SEC (C = 1)
+    wait for 2 * TCLK;
+    
+    -- Next test the LDA and LDB opcodes. 
+    -- Note LDB will need checked visually due to lack of an output
+    wait until CLOCK = '1';
+    DIN <= RANDOM (DIN'length);
+    OPCODE <= "1100";                                                            -- LDA (A = DIN)
+    wait for 2 * TCLK;
+    
+    wait until CLOCK = '1';
+    DIN <= RANDOM (DIN'length);
+    OPCODE <= "1101";                                                            -- LDB (B = DIN)
+    wait for 2 * TCLK;
+    
+    -- Next test the OR, AND, XOR, and NOT operators
+    for I in 1 to 10 loop                                                        -- Testing the OR opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1000";                                                          -- OR  (A = A | B)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the AND opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1001";                                                          -- AND (A = A & B)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the XOR opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1010";                                                          -- XOR (A = A ^ B)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the NOT opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1011";                                                          -- NOT (A = ~A)
+      wait for 2 * TCLK;
+    end loop;
+    
+    -- Next test the SLL, SRR, and ASR opcodes
+    for I in 1 to 10 loop                                                        -- Testing the SLL opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1110";                                                          -- CLC (C = 0)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0101";                                                          -- SLL (A = (A << 1) | C)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1111";                                                          -- SEC (C = 1)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0101";                                                          -- SLL (A = (A << 1) | C)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the SRR opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1110";                                                          -- CLC (C = 0)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0110";                                                          -- SRR (A = C | (A >> 1))
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1111";                                                          -- SEC (C = 1)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0110";                                                          -- SRR (A = C | (A >> 1))
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the ASR opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1110";                                                          -- CLC (C = 0)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0111";                                                          -- ASR (A = N | (A >> 1))
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1111";                                                          -- SEC (C = 1)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0111";                                                          -- ASR (A = N | (A >> 1))
+      wait for 2 * TCLK;
+    end loop;
+    
+    -- Next test the INC and DEC opcodes
+    for I in 1 to 10 loop                                                        -- Testing the INC opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0010";                                                          -- INC (A = A + 1)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the DEC opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0011";                                                          -- DEC (A = A - 1)
+      wait for 2 * TCLK;
+    end loop;
+    
+    -- Next test the ADD, SUB, and CMP opcodes
+    for I in 1 to 10 loop                                                        -- Testing the ADD opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1110";                                                          -- CLC (C = 0)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0000";                                                          -- ADD (A = A + B + C)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1111";                                                          -- SEC (C = 1)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0000";                                                          -- ADD (A = A + B + C)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the SUB opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1110";                                                          -- CLC (C = 0)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0001";                                                          -- SUB (A = A - B + C)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "1111";                                                          -- SEC (C = 1)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0001";                                                          -- SUB (A = A - B + C)
+      wait for 2 * TCLK;
+    end loop;
+    
+    for I in 1 to 10 loop                                                        -- Testing the CMP opcode
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1100";                                                          -- LDA (A = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      DIN <= RANDOM (DIN'length);
+      OPCODE <= "1101";                                                          -- LDB (B = DIN)
+      wait for 2 * TCLK;
+      
+      wait until CLOCK = '1';
+      OPCODE <= "0100";                                                          -- CMP (A - B)
+      wait for 2 * TCLK;
+    end loop;
+    
+    -- Constrained Random Testing
+    for I in 1 to 2048 loop
+      loop
+        wait until CLOCK  = '1';                                                 -- Placed before the OPCODE and DIN statements
+        exit when  ENABLE = '1';                                                 -- to wait till CLOCK = '1' after the CMP test
+      end loop;
+      OPCODE <= RANDOM(OPCODE'length);
+      DIN    <= RANDOM(DIN'length);
+    end loop;
+    
+    DONE <= TRUE;                                                                -- end of simulation
+    wait;
+  end process;
+  
+------------------
+--  Output Monitor
+------------------
+  
+  process
+    variable EXPECT     : unsigned (BITS downto 0)   := (others => '0');
+    variable A, B       : unsigned (BITS-1 downto 0) := (others => '0');
+    variable N, V, C, Z : std_logic := '0';
+    variable CHECK      : std_logic := '0';
+  begin
+    wait until CLOCK = '1';
+    if (CHECK = '1') then                                                        -- Assert statements to determine accuracy of RTL
+      assert (A = unsigned (ACCUM)) report "Incorrect accumulator value" severity error;
+      assert (N = FLAGS (3))        report "Incorrect N flag state"      severity error;
+      assert (V = FLAGS (2))        report "Incorrect V flag state"      severity error;
+      assert (C = FLAGS (1))        report "Incorrect C flag state"      severity error;
+      assert (Z = FLAGS (0))        report "Incorrect Z flag state"      severity error;
+    end if;
+    CHECK := ENABLE;                                                             -- Save ENABLE for the next clock cycle to enable assertions
+    if (ENABLE = '1') then 
+      case OPCODE is                                                             -- case statement depends on OPCODE
+        when "0000" => report "OPCODE 01 (ADD)" severity note;
+                       if (C = '0')
+                         then EXPECT := resize (A, BITS+1) + resize (B, BITS+1);
+                         else EXPECT := resize (A, BITS+1) + resize (B, BITS+1) + 1;
+                       end if;
+                       if ((A (BITS-1)) /= (B (BITS-1)))                         -- handles update for V
+                         then V := '0';
+                       elsif (B(BITS-1) = '0')
+                         then V :=     EXPECT (BITS-1);
+                         else V := not EXPECT (BITS-1);
+                       end if;
+                       if (EXPECT (BITS-1 downto 0) = 0)                         -- handles update for Z
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);                                       -- handles update for C
+                       N := EXPECT (BITS-1);                                     -- handles update for N
+                       A := EXPECT (BITS-1 downto 0);                            -- handles update for A
+                       
+        when "0001" => report "OPCODE 02 (SUB)" severity note;
+                       if (C = '0')
+                         then EXPECT := resize (A, BITS+1) - resize (B, BITS+1) - 1;
+                         else EXPECT := resize (A, BITS+1) - resize (B, BITS+1);
+                       end if;
+                       if ((A (BITS-1)) = (B (BITS-1)))
+                         then V := '0';
+                       elsif (B(BITS-1) = '1')
+                         then V :=     EXPECT (BITS-1);
+                         else V := not EXPECT (BITS-1);
+                       end if;
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := not EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "0010" => report "OPCODE 02 (INC)" severity note;
+                       EXPECT := resize (A, BITS+1) + 1;
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "0011" => report "OPCODE 03 (DEC)" severity note;
+                       EXPECT := resize (A, BITS+1) - 1;
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "0100" => report "OPCODE 04 (CMP)" severity note;
+                       EXPECT := resize (A, BITS+1) + resize (not B, BITS+1) + 1;
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       
+        when "0101" => report "OPCODE 05 (SLL)" severity note;
+                       EXPECT := A (BITS-1 downto 0) & C;
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "0110" => report "OPCODE 06 (SRR)" severity note;
+                       EXPECT := A (0) & C & A (BITS-1 downto 1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "0111" => report "OPCODE 07 (ASR)" severity note;
+                       EXPECT := A (0) & A(BITS-1) & A (BITS-1 downto 1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       C := EXPECT (BITS);
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1000" => report "OPCODE 08 (OR)"  severity note;
+                       EXPECT := resize (A, BITS+1) or resize (B, BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1001" => report "OPCODE 09 (AND)" severity note;
+                       EXPECT := resize (A, BITS+1) and resize (B, BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1010" => report "OPCODE 10 (XOR)" severity note;
+                       EXPECT := resize (A, BITS+1) xor resize (B, BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1011" => report "OPCODE 11 (NOT)" severity note;
+                       EXPECT := resize (not A, BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1100" => report "OPCODE 12 (LDA)" severity note;
+                       EXPECT := resize (unsigned (DIN), BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       A := EXPECT (BITS-1 downto 0);
+                       
+        when "1101" => report "OPCODE 13 (LDB)" severity note;
+                       EXPECT := resize (unsigned (DIN), BITS+1);
+                       if (EXPECT (BITS-1 downto 0) = 0)
+                         then Z := '1';
+                         else Z := '0';
+                       end if;
+                       N := EXPECT (BITS-1);
+                       B := EXPECT (BITS-1 downto 0);
+                       
+        when "1110" => report "OPCODE 14 (CLC)" severity note;
+                       C := '0';
+                       
+        when "1111" => report "OPCODE 15 (SEC)" severity note;
+                       C := '1';
+                       
+        when others => report "Illegal OPCODE"  severity error;                  -- Handles invalid OPCODE
+      end case;
+    end if;
+  end process;
+  
+  
+end architecture;

@@ -1,0 +1,174 @@
+
+   library IEEE;
+   use     IEEE.std_logic_1164.all;
+   use     IEEE.numeric_std.all;
+
+entity TB is
+end TB;
+
+--------------------------------
+architecture Behavioral of TB is 
+--------------------------------
+
+  component CIPHER is
+    port ( RESET   : in  std_logic;                       -- Active high master reset
+           CLOCK   : in  std_logic;                       -- Master clock
+           LOAD    : in  std_logic;                       -- Key load control
+           KEY     : in  std_logic_vector (39 downto 0);  -- Key data
+           READY   : in  std_logic;                       -- Plaintext data ready
+           DIN     : in  std_logic_vector  (7 downto 0);  -- Plaintext data input
+           VALID   : out std_logic;                       -- Ciphertext data valid
+           DOUT    : out std_logic_vector  (7 downto 0)); -- Ciphertext data output
+  end component;
+  
+  constant TCLK    : time    := 1 uS;
+  signal   DONE    : boolean := FALSE; 
+  
+  constant KEYWORD : string (5 downto 1) := "sweet";
+  
+  signal   RESET   : std_logic;
+  signal   CLOCK   : std_logic;
+  signal   LOAD    : std_logic;
+  signal   KEY     : std_logic_vector (39 downto 0);
+  signal   READY   : std_logic;
+  signal   DIN     : std_logic_vector  (7 downto 0);
+  signal   VALID   : std_logic;
+  signal   DOUT    : std_logic_vector  (7 downto 0);
+  
+  --signal   LFSR17  : std_logic_vector (17 downto 1);
+  --signal   LFSR23  : std_logic_vector (23 downto 1);
+
+  
+begin
+
+-------------------
+--  Unit Under Test
+-------------------
+
+  UUT: CIPHER
+    port map (RESET => RESET,
+              CLOCK => CLOCK,
+              LOAD  => LOAD,
+              KEY   => KEY,
+              READY => READY,
+              DIN   => DIN,
+              VALID => VALID,
+              DOUT  => DOUT );
+  
+----------------------
+--  Clock/Reset Driver
+----------------------
+  
+  process begin
+    RESET <= '1', '0' after TCLK;                                                                       -- Initial reset
+    CLOCK <= '0';                                                                                       --
+    wait for 2 * TCLK;                                                                                  -- Wait for initial stabilization
+    
+    while not DONE loop                                                                                 -- While loop that controls the clock
+      CLOCK <= '1', '0' after TCLK / 2;                                                                 -- Clock is HIGH for half of TCLK and LOW for the other half
+      wait for TCLK;                                                                                    -- Do this once per TCLK
+    end loop;                                                                                           -- 
+    
+    report "Simulation Complete" severity note;                                                         -- Successful simulation report
+    wait;
+  end process;
+  
+---------------------------
+--  Main Test Signal Driver
+---------------------------
+  
+  process 
+    type     Character_File is file of character;
+    file     FID    : Character_File;
+    variable STATUS : file_open_status;
+    variable CHAR   : character;
+  begin
+    LOAD  <= '0';
+    DIN   <= (others => '0');
+    KEY   <= (others => '0');
+    
+    wait until CLOCK = '1';
+    
+    for I in 0 to 4 loop
+      KEY (8*I+7 downto 8*I) <= std_logic_vector (To_Unsigned (character'pos (KEYWORD (I+1)), 8));      -- Loads KEYWORD to KEY
+    end loop;
+    
+    LOAD <= '1';
+    wait until CLOCK = '1';
+    LOAD <= '0';
+    
+    file_open (STATUS, FID, "plain.txt", read_mode);
+    if (STATUS /= open_ok) then
+      report "Could not open plaintext file" severity failure;
+      DONE <= TRUE;
+      wait;
+    end if;
+    
+    wait until CLOCK = '1';
+    
+    
+    while not endfile (FID) loop
+      read (FID, CHAR);
+      DIN <= std_logic_vector (To_Unsigned (character'pos (CHAR), 8));
+      loop
+        wait until CLOCK = '1';
+        exit when  READY = '1';
+      end loop;
+    end loop;
+    file_close(FID);
+    
+    DONE <= TRUE;
+    wait;
+  end process;
+  
+------------------
+--  Output Monitor
+------------------
+  
+  process 
+    type     Character_File is file of character;
+    file     FID    : Character_File;
+    variable STATUS : file_open_status;
+    variable CHAR   : character;
+  begin
+    file_open (STATUS, FID, KEYWORD & ".txt", read_mode);
+    if (STATUS /= open_ok) then
+      report "Could not open encoded file" severity failure;
+      --DONE <= TRUE;
+      wait;
+    end if;
+    
+    while not endfile (FID) loop
+      read (FID, CHAR);
+      loop
+        wait until CLOCK = '1';
+        exit when  VALID = '1';
+      end loop;
+      assert (CHAR = character'val (To_Integer (unsigned (DOUT)))) report "Incorrect encoding" severity error;
+    end loop;
+    file_close(FID);
+  end process;
+  
+-----------------------------
+--  Ready Driver (Randomized)
+-----------------------------
+  
+  process 
+    variable  LFSR : std_logic_vector (1 to 23) := "011" & x"C0DED";
+    
+    impure function RANDOM (SIZE : natural) return std_logic_vector is
+      variable RTN : std_logic_vector (1 to SIZE);
+    begin
+      for I in 1 to SIZE loop
+        LFSR := (LFSR (18) xor LFSR (23)) & LFSR (1 to 22);                      -- CCITT O.151 test pattern
+        RTN (I) := LFSR (1);
+      end loop;
+      return RTN;
+    end RANDOM;
+    
+  begin
+    READY <= RANDOM(1)(1);
+    wait until CLOCK = '1';
+  end process;
+  
+end architecture;

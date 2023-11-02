@@ -1,0 +1,279 @@
+----------------------------------------------------------------------------------------------------
+--  MULTIPLEXED SEVEN SEGMENT DISPLAY DRIVER TEST BENCH
+----------------------------------------------------------------------------------------------------
+
+library IEEE;
+use     IEEE.std_logic_1164.all;
+use     IEEE.numeric_std.all;
+
+entity TB is
+end TB;
+
+-----------------------------------
+architecture SEVEN_SEGMENT of TB is
+-----------------------------------
+
+--  >>> Place UUT component declaration here <<<
+    component SEVEN_SEGMENT is
+       generic ( DIGITS   : natural := 8 );                                -- The number of digits in the display
+       port    ( RESET    : in  std_logic;                                 -- Active high master reset
+                 CLOCK    : in  std_logic;                                 -- Master clock
+                 ENABLE   : in  std_logic;                                 -- Clock enable
+                 CLEAR    : in  std_logic;                                 -- Synchronous clear
+                 BLANKING : in  std_logic;                                 -- Leading 0 blanking control
+                 DATA     : in  std_logic_vector (4*DIGITS-1 downto 0);    -- Display value
+                 DP       : in  std_logic_vector   (DIGITS-1 downto 0);    -- Decimal point enable for each digit
+                 DIGIT    : out std_logic_vector   (DIGITS-1 downto 0);    -- 7-segment digit enable
+                 SEGMENT  : out std_logic_vector          (7 downto 0));   -- 7-segment segment enable
+    end component;
+    
+--  >>> Place UUT constant and signal declarations here <<<
+    constant  TCLK     : time    :=  1 uS;
+    constant  DIGITS   : natural :=  8;
+    signal    DONE     : boolean := FALSE;
+    signal    SYNC     : std_logic := '0';                                 -- Test bench timing synchronization
+    signal    POINTS   : std_logic_vector (DIGITS downto 1) := (others => '0');
+    signal    DISPLAY  : string           (DIGITS downto 1) := (others => ' ');
+    
+    signal    RESET    : std_logic;                                        -- Active high master reset
+    signal    CLOCK    : std_logic;                                        -- Master clock
+    signal    ENABLE   : std_logic;                                        -- Clock enable
+    signal    CLEAR    : std_logic;                                        -- Synchronous clear
+    signal    BLANKING : std_logic;                                        -- Leading 0 blanking control
+    signal    DATA     : std_logic_vector (4*DIGITS-1 downto 0);           -- Display value
+    signal    DP       : std_logic_vector   (DIGITS-1 downto 0);           -- Decimal point enable for each digit
+    signal    DIGIT    : std_logic_vector   (DIGITS-1 downto 0);           -- 7-segment digit enable
+    signal    SEGMENT  : std_logic_vector          (7 downto 0);           -- 7-segment segment enable
+    
+
+--  Convert a seven segment digit to a character
+
+  ---------------------------------------------------------------------------------
+  function Seg2Char (SEG : std_logic_vector (6 downto 0)) return character is begin
+  ---------------------------------------------------------------------------------
+    case SEG is
+      when "0000000" =>  return ' ';     --          0
+      when "0111111" =>  return '0';     --        +---+
+      when "0000110" =>  return '1';     --      5 |   | 1
+      when "1011011" =>  return '2';     --        +---+
+      when "1001111" =>  return '3';     --      4 | 6 | 2
+      when "1100110" =>  return '4';     --        +---+
+      when "1101101" =>  return '5';     --          3
+      when "1111101" =>  return '6';
+      when "0000111" =>  return '7';
+      when "1111111" =>  return '8';
+      when "1101111" =>  return '9';
+      when "1110111" =>  return 'A';
+      when "1111100" =>  return 'b';
+      when "0111001" =>  return 'C';
+      when "1011110" =>  return 'd';
+      when "1111001" =>  return 'E';
+      when "1110001" =>  return 'F';
+      when others    =>  return 'X';
+    end case;
+  end Seg2Char;
+
+--  Convert a 4-bit vector to a character
+
+  ----------------------------------------------------------------------------------
+  function Hex2Char (DATA : std_logic_vector (3 downto 0)) return character is begin
+  ----------------------------------------------------------------------------------
+    case DATA is
+      when "0000" =>  return '0';
+      when "0001" =>  return '1';
+      when "0010" =>  return '2';
+      when "0011" =>  return '3';
+      when "0100" =>  return '4';
+      when "0101" =>  return '5';
+      when "0110" =>  return '6';
+      when "0111" =>  return '7';
+      when "1000" =>  return '8';
+      when "1001" =>  return '9';
+      when "1010" =>  return 'A';
+      when "1011" =>  return 'b';
+      when "1100" =>  return 'C';
+      when "1101" =>  return 'd';
+      when "1110" =>  return 'E';
+      when "1111" =>  return 'F';
+      when others =>  return '?';
+    end case;
+  end Hex2Char;
+
+begin
+
+-------------------
+--  Unit Under Test
+-------------------
+
+--  >>> Place UUT component instantiation here <<<
+    UUT: SEVEN_SEGMENT                                                     -- Component Instantiation of SEVEN_SEGMENT
+     generic map ( DIGITS   => 8)                                          -- Sets DIGITS to 8
+     port    map ( RESET    => RESET,
+                   CLOCK    => CLOCK,
+                   ENABLE   => ENABLE,
+                   CLEAR    => CLEAR,
+                   BLANKING => BLANKING,
+                   DATA     => DATA,
+                   DP       => DP,
+                   DIGIT    => DIGIT,
+                   SEGMENT  => SEGMENT );
+
+----------------------
+--  Clock/Reset Driver
+----------------------
+
+--  >>> Place clock/reset driver here <<<
+    process begin
+      RESET <= '1', '0' after TCLK;                                        -- Initial reset
+      CLOCK <= '0';                                                        --
+      wait for 2 * TCLK;                                                   -- Wait for initial stabilization
+      
+      while not DONE loop                                                  -- While loop that controls the clock
+        CLOCK <= '1', '0' after TCLK / 2;                                  -- Clock is HIGH for half of TCLK and LOW for the other half
+        wait for TCLK;                                                     -- Do this once per TCLK
+      end loop;                                                            -- 
+      
+      report "Simulation Complete" severity note;                          -- Successful simulation report
+      wait;
+    end process;
+    
+-----------------------
+--  Clock Enable Driver
+-----------------------
+
+--  >>> Place clock enable driver here <<<
+    process begin                                                          -- This process flips ENABLE at half the frequency of CLOCK
+      ENABLE <= '0';                                                       -- Sets ENABLE to LOW
+      wait until CLOCK = '1';                                              -- Waits for rising edge 
+      ENABLE <= '1';                                                       -- Sets ENABLE to HIGH 
+      wait until CLOCK = '1';                                              -- Waits for rising edge 
+    end process;                                                           -- 
+
+---------------------------
+--  Main Test Signal Driver
+---------------------------
+
+  process begin
+
+--  >>> Place signal initialization here for signals driven by this process <<<
+    CLEAR <= '0';                                                          -- Presets signals to 0
+    BLANKING <= '0';                                                       -- 
+    DATA <= (others => '0');                                               -- 
+    DP <= (others => '0');                                                 -- 
+
+    wait for 2 * TCLK;                                                     -- Wait for two clock cycles
+    
+    report "Starting Simulation" severity note;                            -- Simulation start report
+    
+--  >>> Place test signal generation here <<<
+    for j in 0 to DIGITS-1 loop                                            -- Run once per digit
+      DP (j) <= '1';                                                       -- Decimal point test
+      for i in 0 to 15 loop                                                -- Run once per possible number
+        DATA(4*j+3 downto 4*j) <= std_logic_vector(to_unsigned(i, 4));     -- Set DATA to test each digit individually (0 to F)
+        wait until SYNC = '1';                                             -- Wait for SYNC to be asserted
+      end loop;
+      DP (j) <= '0';                                                       -- Resets decimal point
+      DATA(4*j+3 downto 4*j) <= "0000";                                    -- Resets the data back to 0
+    end loop;
+    
+    BLANKING <= '1';
+    DATA <= (others => '0');
+    
+    for j in 0 to DIGITS-1 loop                                            -- Run once per digit
+      DP (j) <= '1';                                                       -- Decimal point test
+      for i in 0 to 15 loop                                                -- Run once per possible number
+        DATA(4*j+3 downto 4*j) <= std_logic_vector(to_unsigned(i, 4));     -- Set DATA to test each digit individually (0 to F)
+        wait until SYNC = '1';                                             -- Wait for SYNC to be asserted
+      end loop;
+      DP (j) <= '0';                                                       -- Resets decimal point
+      DATA(4*j+3 downto 4*j) <= "0000";                                    -- Resets the data back to 0
+    end loop;
+    
+    CLEAR <= '1';                                                          -- Test the CLEAR signal
+    
+    wait for 2 * TCLK;
+                                                                           -- The below asserts whether the CLEAR signal successfully reset DIGIT and SEGMENT
+    assert (unsigned(DIGIT) = 0) report "DIGIT did not reset on CLEAR" severity error;
+    assert (unsigned(SEGMENT) = 0) report "SEGMENTS did not reset on CLEAR" severity error;
+    
+    DONE <= TRUE;                                                          -- Ends the simulation
+    wait;
+  end process;
+
+------------------------------
+--  Test Bench Synchronization
+------------------------------
+
+--  Assert SYNC when the most significant digit is enabled
+--    This indicates it is safe to change the DATA and DP inputs for the next multiplexed display cycle
+--  Clear SYNC when the least significant digit is enabled
+--    This indicates it is safe to test the DIGIT and SEGMENT outputs
+
+  process begin
+    wait until CLOCK = '1';
+    if (ENABLE = '1') then
+      if (DIGIT (DIGITS-2) = '1') then
+        SYNC <= '1';
+      elsif (DIGIT (DIGITS-1) = '1') then
+        SYNC <= '0';
+      end if;
+    end if;
+  end process;
+
+------------------
+--  Output Monitor
+------------------
+
+--  Convert the display segments to a character string and collect the decimal point data
+--  On each clock edge, save the illuminated character and decimal point for the enabled digit
+
+  process begin
+    wait until CLOCK = '1';
+    for I in 0 to DIGITS-1 loop
+      if (DIGIT (I) = '1') then
+        DISPLAY (I+1) <= Seg2Char (SEGMENT (6 downto 0));
+        POINTS  (I+1) <= SEGMENT (7);
+      end if;
+    end loop;
+  end process;
+
+--  Check the display driver results against the expected output
+--  Determine the expected display value by converting the DATA input to a string
+--    while performing leading zero blanking when BLANKING = '1'
+
+  process
+    variable  EXPECT : string (DIGITS downto 1);
+    variable  BLANK  : boolean;
+  begin
+    wait until SYNC = '1';
+
+    BLANK := (BLANKING = '1');
+    for I in DIGITS-1 downto 1 loop
+      if (DATA (4*I+3 downto 4*I) /= "0000") then
+        BLANK := FALSE;
+      end if;
+      if (BLANK)
+        then EXPECT (I+1) := ' ';
+        else EXPECT (I+1) := Hex2Char (DATA (4*I+3 downto 4*I));
+      end if;
+    end loop;
+
+    EXPECT (1) := Hex2Char (DATA (3 downto 0));  --  Digit 0 is always enabled
+
+    wait until SYNC = '0';
+    assert (DISPLAY = EXPECT) report "Incorrect segment output" severity error;
+  end process;
+
+--  Decimal point check
+
+  process
+    variable  EXPECT : std_logic_vector (DIGITS downto 1);
+  begin
+    wait until SYNC = '1';
+    EXPECT := DP;
+
+    wait until SYNC = '0';
+    assert (POINTS = EXPECT) report "Decimal points incorrectly illuminated" severity error;
+  end process;
+
+end architecture;
